@@ -1,4 +1,5 @@
 import os
+import random
 import unicodedata
 import discord
 from discord.ext import commands
@@ -10,7 +11,10 @@ intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- ワードリストの設定 ---
+# --- 設定項目 ---
+
+# 捕食ログ（処分記録）を投稿するチャンネルID
+RECORD_CHANNEL_ID = 1531955600819359808
 
 # 2. 【即捕食（BAN）】対象ワード リスト
 BAN_WORDS = [
@@ -22,12 +26,10 @@ BAN_WORDS = [
 
 # 3. 【ルンバお掃除】自動削除ワード リスト
 DELETE_WORDS = [
-    # 暴言・不適切ワード
     "障害者", "ガイジ", "キチガイ", "きちがい",
     "ゴミ", "カス", "雑魚", "ざこ", "不細工", "ぶさいく",
     "頭悪い", "低能", "無能", "語彙力ないね",
     "何がありがとうなの？", "はい論破",
-    # 淫夢語録（日常でほぼ使わない明確なフレーズのみ残す）
     "逝きすぎ", "いきすぎ", "イキすぎ", "イクイク", "いくいく",
     "ヌッ！", "ぬっ！", "王道を往く", "悔い上げて", 
     "悔い改めて", "歪みねぇな", "だらしねぇな", "そうだよ（便乗）"
@@ -36,6 +38,68 @@ DELETE_WORDS = [
 def normalize_text(text: str) -> str:
     """全角・半角の揺れや大文字小文字を統一する"""
     return unicodedata.normalize('NFKC', text).lower()
+
+def bite_text(text: str, chance: float = 0.25) -> str:
+    """
+    文章全体から多種多様な噛み・ドモリを発生させ、
+    噛んだ場合は慌てて自力で言い直す演出を追加する関数
+    """
+    if random.random() > chance:
+        return text  # 噛まない（完璧な発言）
+
+    # 1. 置き換えパターン
+    replacements = {
+        "でした": ["でひた", "でふた", "でしゅた"],
+        "しました": ["ひました", "しやした", "しまひた"],
+        "ます": ["まふ", "ましゅ", "まつ"],
+        "ごちそうさま": ["ごひちそうさま", "ごちほうさま", "ごちそうしゃま"],
+        "禁止": ["きんひ", "きんしぃ"],
+        "捕食": ["ほほく", "ほふぉく"],
+        "清掃": ["ふぇいそう", "せいそうっ"],
+        "美味しく": ["おいひく", "おひしく"],
+        "食されました": ["たべられまひた", "くわれまひた"],
+        "二度と": ["にろと", "に、二度と"],
+        "ありません": ["ありまひぇん", "ありやせん"],
+        "完了": ["かんりょうっ", "か、完了"],
+        "ルンバ": ["るんばっ", "ル、ルンバ"],
+        "弱肉強食": ["じゃくにくきょうしょくっ", "じゃく、弱肉強食"],
+    }
+
+    bitten = text
+    bitten_flag = False
+
+    # 単語置き換え
+    for original, changed in replacements.items():
+        if original in bitten:
+            if isinstance(changed, list):
+                bitten = bitten.replace(original, random.choice(changed), 1)
+            else:
+                bitten = bitten.replace(original, changed, 1)
+            bitten_flag = True
+
+    # 助詞のドモリ
+    particles = ["は", "が", "を", "に"]
+    for p in particles:
+        if p in bitten and random.random() < 0.3:
+            bitten = bitten.replace(p, f"{p}、{p}", 1)
+            bitten_flag = True
+            break
+
+    # 2. 噛んだ場合の「言い直し」セリフを文末に追加
+    if bitten_flag:
+        fix_phrases = [
+            "……あ、コホン！……違います、です！",
+            "……っ！……じゃなくて、です！",
+            "……噛みました。……ゲホン、です！",
+            "……あふっ！……気を取り直して、です！",
+            "……〜〜〜っ！……噛んでないです、です！"
+        ]
+        bitten += f" {random.choice(fix_phrases)}"
+    else:
+        bitten += "……あ、噛みました。"
+
+    return bitten
+
 
 @bot.event
 async def on_ready():
@@ -49,30 +113,28 @@ async def on_message(message: discord.Message):
     content_normalized = normalize_text(message.content)
 
     # --------------------------------------------------
-    # 1. 捕食（即BAN処理）- 複数検出対応
+    # 1. 捕食（即BAN処理）
     # --------------------------------------------------
-    # メッセージに含まれている禁止ワードをすべて収集
     detected_ban_words = [
         word for word in BAN_WORDS 
         if normalize_text(word) in content_normalized
     ]
 
     if detected_ban_words:
-        # 該当メッセージを削除
         try:
             await message.delete()
         except discord.HTTPException:
             pass
 
-        # 検出された単語を「, 」で繋ぐ（例: 野獣先輩, 114514, 810）
         words_str = "』『".join(detected_ban_words)
 
-        # BANされる罪人への送別メッセージ（DM）
-        dm_notice = (
+        # DM通知（噛み＆言い直し適用）
+        raw_dm_notice = (
             f"【捕食通知】\n"
             f"あなたは禁止ワード『{words_str}』を放ったため、弱肉強食の理により食されました。\n"
-            f"ごちそうさでした。二度とお目にかかることはないでしょう。"
+            f"ごちそうさまでした。二度とお目にかかることはないでしょう。"
         )
+        dm_notice = bite_text(raw_dm_notice, chance=0.25)
 
         try:
             await message.author.send(dm_notice)
@@ -82,7 +144,7 @@ async def on_message(message: discord.Message):
         except discord.HTTPException as e:
             print(f"【DM送信エラー】: {e}")
 
-        # サーバーから追放（BAN）を実行
+        # BANを実行
         try:
             reason_words = ", ".join(detected_ban_words)
             await message.guild.ban(
@@ -90,14 +152,38 @@ async def on_message(message: discord.Message):
                 reason=f"禁止ワード（{reason_words}）の検出により子分BOTが捕食（BAN）しました。"
             )
             
-            eat_msg = await message.channel.send(
-                f"🍖 **捕食完了:** {message.author.mention} は禁止ワードを放ったため、美味しく食されました。ごちそうさでした！"
-            )
+            # 発言チャンネルでの報告（噛み＆言い直し適用）
+            raw_channel_eat_text = f"🍖 **捕食完了:** {message.author.mention} は禁止ワードを放ったため、美味しく食されました。ごちそうさでした！"
+            channel_eat_text = bite_text(raw_channel_eat_text, chance=0.25)
+            eat_msg = await message.channel.send(channel_eat_text)
             await eat_msg.delete(delay=5)
+
+            # --- 処分記録（アーカイブ）投稿 ---
+            record_channel = bot.get_channel(RECORD_CHANNEL_ID)
+            if record_channel:
+                title_text = bite_text("📜 【捕食アーカイブ】処分ユーザー記録", chance=0.25)
+                # 本文は固定で威厳を保つ
+                desc_text = "弱肉強食の理により、新たな荒らしが食されました。ごちそうさでした！"
+                footer_text = bite_text("弱肉強食の理により、サーバーの平和は保たれた…", chance=0.25)
+
+                embed = discord.Embed(
+                    title=title_text,
+                    description=desc_text,
+                    color=discord.Color.dark_red()
+                )
+                embed.set_thumbnail(url=message.author.display_avatar.url)
+                embed.add_field(name="対象ユーザー", value=f"{message.author.mention} (`{message.author.name}`)", inline=False)
+                embed.add_field(name="検出ワード", value=f"`{reason_words}`", inline=False)
+                embed.set_footer(text=footer_text)
+                
+                await record_channel.send(embed=embed)
+
             print(f"【捕食完了】{message.author} をBAN（完食）しました。")
 
         except discord.Forbidden:
-            await message.channel.send("【エラー】捕食しようとしましたが、権限が足りず食べ残してしまいました（BOTより権限が高いか同等です）。")
+            raw_err_msg = "【エラー】捕食しようとしましたが、権限が足りず食べ残してしまいました（BOTより権限が高いか同等です）。"
+            err_msg = bite_text(raw_err_msg, chance=0.35)
+            await message.channel.send(err_msg)
         except discord.HTTPException as e:
             await message.channel.send(f"【エラー】捕食処理に失敗しました: {e}")
 
@@ -110,9 +196,9 @@ async def on_message(message: discord.Message):
         if normalize_text(word) in content_normalized:
             try:
                 await message.delete()
-                clean_msg = await message.channel.send(
-                    f"🧹 **清掃完了:** {message.author.mention} の不適切な発言をルンバがキレイに清掃しました。"
-                )
+                raw_clean_text = f"🧹 **清掃完了:** {message.author.mention} の不適切な発言をルンバがキレイに清掃しました。"
+                clean_text = bite_text(raw_clean_text, chance=0.25)
+                clean_msg = await message.channel.send(clean_text)
                 await clean_msg.delete(delay=5)
             except discord.Forbidden:
                 pass
