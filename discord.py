@@ -73,5 +73,10 @@ async def on_message(message):
 
     await bot.process_commands(message)
 
-# 4. Botの起動トークン（あなたのトークンに書き換えてください）
-bot.run("YOUR_BOT_TOKEN_HERE")
+# 4. Botの起動（環境変数からトークンを取得）
+if __name__ == "__main__":
+    token = os.getenv("DISCORD_TOKEN")
+    if not token:
+        print("【エラー】DISCORD_TOKEN が設定されていません。")
+    else:
+        bot.run(token)
