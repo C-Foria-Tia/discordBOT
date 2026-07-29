@@ -153,7 +153,7 @@ async def on_message(message: discord.Message):
             )
             
             # 発言チャンネルでの報告（噛み＆言い直し適用）
-            raw_channel_eat_text = f"🍖 **捕食完了:** {message.author.mention} は禁止ワードを放ったため、美味しく食されました。ごちそうさでした！"
+            raw_channel_eat_text = f"🍖 **捕食完了:** {message.author.mention} は禁止ワードを放ったため、美味しく食されました。ごちそうさまでした！"
             channel_eat_text = bite_text(raw_channel_eat_text, chance=0.25)
             eat_msg = await message.channel.send(channel_eat_text)
             await eat_msg.delete(delay=5)
@@ -163,7 +163,7 @@ async def on_message(message: discord.Message):
             if record_channel:
                 title_text = bite_text("📜 【捕食アーカイブ】処分ユーザー記録", chance=0.25)
                 # 本文は固定で威厳を保つ
-                desc_text = "弱肉強食の理により、新たな荒らしが食されました。ごちそうさでした！"
+                desc_text = "弱肉強食の理により、新たな荒らしが食されました。ごちそうさまでした！"
                 footer_text = bite_text("弱肉強食の理により、サーバーの平和は保たれた…", chance=0.25)
 
                 embed = discord.Embed(
