@@ -20,9 +20,8 @@ BAN_WORDS = [
     "1919", "810", "114514810"
 ]
 
-# 3. 【ルンバお掃除】自動削除ワード リスト（「冷えてるか」を除外）
+# 3. 【ルンバお掃除】自動削除ワード リスト
 DELETE_WORDS = [
-    # 暴言・不適切ワード
     "障害者", "ガイジ", "キチガイ", "きちがい",
     "ゴミ", "カス", "雑魚", "ざこ", "不細工", "ぶさいく",
     "頭悪い", "低能", "無能", "語彙力ないね",
@@ -43,67 +42,71 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
-    # Bot自身の発言は無視
     if message.author.bot:
         return
 
     content_normalized = normalize_text(message.content)
 
     # --------------------------------------------------
-    # 1. 捕食（即BAN処理）
+    # 1. 捕食（即BAN処理）- 複数検出対応
     # --------------------------------------------------
-    for word in BAN_WORDS:
-        word_normalized = normalize_text(word)
-        if word_normalized in content_normalized:
-            # 該当メッセージを削除
-            try:
-                await message.delete()
-            except discord.HTTPException:
-                pass
+    # メッセージに含まれている禁止ワードをすべて収集
+    detected_ban_words = [
+        word for word in BAN_WORDS 
+        if normalize_text(word) in content_normalized
+    ]
 
-            # BANされる罪人（ユーザー）への送別メッセージ（DM）
-            dm_notice = (
-                f"【捕食通知】\n"
-                f"あなたは禁止ワード『{word}』を放ったため、弱肉強食の理により食されました。\n"
-                f"ごちそうさまでした。二度とお目にかかることはないでしょう。"
+    if detected_ban_words:
+        # 該当メッセージを削除
+        try:
+            await message.delete()
+        except discord.HTTPException:
+            pass
+
+        # 検出された単語を「, 」で繋ぐ（例: 野獣先輩, 114514, 810）
+        words_str = "』『".join(detected_ban_words)
+
+        # BANされる罪人への送別メッセージ（DM）
+        dm_notice = (
+            f"【捕食通知】\n"
+            f"あなたは禁止ワード『{words_str}』を放ったため、弱肉強食の理により食されました。\n"
+            f"ごちそうさでした。二度とお目にかかることはないでしょう。"
+        )
+
+        try:
+            await message.author.send(dm_notice)
+            print(f"【捕食】{message.author} にDM（宣告）を送信しました。")
+        except discord.Forbidden:
+            print(f"【警告】{message.author} のDMが閉じているため、直接捕食へ移行します。")
+        except discord.HTTPException as e:
+            print(f"【DM送信エラー】: {e}")
+
+        # サーバーから追放（BAN）を実行
+        try:
+            reason_words = ", ".join(detected_ban_words)
+            await message.guild.ban(
+                message.author,
+                reason=f"禁止ワード（{reason_words}）の検出により子分BOTが捕食（BAN）しました。"
             )
+            
+            eat_msg = await message.channel.send(
+                f"🍖 **捕食完了:** {message.author.mention} は禁止ワードを放ったため、美味しく食されました。ごちそうさでした！"
+            )
+            await eat_msg.delete(delay=5)
+            print(f"【捕食完了】{message.author} をBAN（完食）しました。")
 
-            # 先にDMを送信する（拒否されている場合はログを出してスキップ）
-            try:
-                await message.author.send(dm_notice)
-                print(f"【捕食】{message.author} にDM（宣告）を送信しました。")
-            except discord.Forbidden:
-                print(f"【警告】{message.author} のDMが閉じているため、直接捕食へ移行します。")
-            except discord.HTTPException as e:
-                print(f"【DM送信エラー】: {e}")
+        except discord.Forbidden:
+            await message.channel.send("【エラー】捕食しようとしましたが、権限が足りず食べ残してしまいました（BOTより権限が高いか同等です）。")
+        except discord.HTTPException as e:
+            await message.channel.send(f"【エラー】捕食処理に失敗しました: {e}")
 
-            # サーバーから追放（BAN）を実行
-            try:
-                await message.guild.ban(
-                    message.author,
-                    reason=f"禁止ワード『{word}』の検出により子分BOTが捕食（BAN）しました。"
-                )
-                
-                # チャンネルにも捕食報告を残す（5秒後に自動消去）
-                eat_msg = await message.channel.send(
-                    f"🍖 **捕食完了:** {message.author.mention} は禁止ワードを放ったため、美味しく食されました。ごちそうさでした！"
-                )
-                await eat_msg.delete(delay=5)
-                print(f"【捕食完了】{message.author} をBAN（完食）しました。")
-
-            except discord.Forbidden:
-                await message.channel.send("【エラー】捕食しようとしましたが、権限が足りず食べ残してしまいました（BOTより権限が高いか同等です）。")
-            except discord.HTTPException as e:
-                await message.channel.send(f"【エラー】捕食処理に失敗しました: {e}")
-
-            return  # 捕食が完了したら処理終了
+        return
 
     # --------------------------------------------------
     # 2. 清掃（メッセージ削除処理）
     # --------------------------------------------------
     for word in DELETE_WORDS:
-        word_normalized = normalize_text(word)
-        if word_normalized in content_normalized:
+        if normalize_text(word) in content_normalized:
             try:
                 await message.delete()
                 clean_msg = await message.channel.send(
