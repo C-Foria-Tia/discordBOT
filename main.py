@@ -1,16 +1,18 @@
 import os
+import unicodedata
 import discord
 from discord.ext import commands
 
-# 1. Botの基本設定と権限
+# 1. Botの基本設定と権限（Intents）
 intents = discord.Intents.default()
-intents.message_content = True  # メッセージ内容を読み取る権限
-intents.guilds = True
-intents.members = True          # BANするために必要
+intents.message_content = True
+intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 2. 【即BAN】トラップワード リスト
+# --- ワードリストの設定 ---
+
+# 2. 【即捕食（BAN）】対象ワード リスト
 BAN_WORDS = [
     "野獣先輩", "YJSPY", "yjspy", "やじゅうせんぱい", "ヤジュウセンパイ",
     "死ね", "タヒね", "しね", "シネ", "殺す", "殺すぞ",
@@ -32,52 +34,95 @@ DELETE_WORDS = [
     "そうだよ", "これもうわかんねぇな"
 ]
 
+def normalize_text(text: str) -> str:
+    """全角・半角の揺れや大文字小文字を統一する"""
+    return unicodedata.normalize('NFKC', text).lower()
+
 @bot.event
 async def on_ready():
-    print(f"治安維持Bot {bot.user.name} が起動しました。清掃を開始します。")
+    print(f"【起動完了】{bot.user} が獲物を探して目を光らせています...")
 
 @bot.event
-async def on_message(message):
-    # Bot自身、または他のBotのメッセージは無視
-    if message.author == bot.user or message.author.bot:
+async def on_message(message: discord.Message):
+    # Bot自身の発言は無視
+    if message.author.bot:
         return
 
-    # スペース（空白）をすべて消去して、スペース空けによる検知回避を無効化
-    content = message.content.replace(" ", "").replace("　", "")
+    content_normalized = normalize_text(message.content)
 
-    # --- トラップ機能：即BANチェック ---
-    for ban_word in BAN_WORDS:
-        if ban_word in content:
+    # --------------------------------------------------
+    # 1. 捕食（即BAN処理）
+    # --------------------------------------------------
+    for word in BAN_WORDS:
+        word_normalized = normalize_text(word)
+        if word_normalized in content_normalized:
+            # 該当メッセージを削除
             try:
-                await message.guild.ban(message.author, reason=f"禁止ワード（淫夢/荒らし）「{ban_word}」の送信による自動BAN")
                 await message.delete()
-                print(f"【BAN】{message.author} を禁止ワード「{ban_word}」検知により追放しました。")
-                return
-            except discord.Forbidden:
-                print(f"【権限エラー】{message.author} をBANする権限がBotにありません。")
             except discord.HTTPException:
-                print("BAN処理中にエラーが発生しました。")
+                pass
 
-    # --- ルンバ機能：自動削除チェック ---
-    for delete_word in DELETE_WORDS:
-        if delete_word in content:
+            # BANされる罪人（ユーザー）への送別メッセージ（DM）
+            dm_notice = (
+                f"【捕食通知】\n"
+                f"あなたは禁止ワード『{word}』を放ったため、弱肉強食の理により食されました。\n"
+                f"ごちそうさまでした。二度とお目にかかることはないでしょう。"
+            )
+
+            # 先にDMを送信する（拒否されている場合はログを出してスキップ）
+            try:
+                await message.author.send(dm_notice)
+                print(f"【捕食】{message.author} にDM（宣告）を送信しました。")
+            except discord.Forbidden:
+                print(f"【警告】{message.author} のDMが閉じているため、直接捕食へ移行します。")
+            except discord.HTTPException as e:
+                print(f"【DM送信エラー】: {e}")
+
+            # サーバーから追放（BAN）を実行
+            try:
+                await message.guild.ban(
+                    message.author,
+                    reason=f"禁止ワード『{word}』の検出により子分BOTが捕食（BAN）しました。"
+                )
+                
+                # チャンネルにも捕食報告を残す（5秒後に自動消去）
+                eat_msg = await message.channel.send(
+                    f"🍖 **捕食完了:** {message.author.mention} は禁止ワードを放ったため、美味しく食されました。ごちそうさでした！"
+                )
+                await eat_msg.delete(delay=5)
+                print(f"【捕食完了】{message.author} をBAN（完食）しました。")
+
+            except discord.Forbidden:
+                await message.channel.send("【エラー】捕食しようとしましたが、権限が足りず食べ残してしまいました（BOTより権限が高いか同等です）。")
+            except discord.HTTPException as e:
+                await message.channel.send(f"【エラー】捕食処理に失敗しました: {e}")
+
+            return  # 捕食が完了したら処理終了
+
+    # --------------------------------------------------
+    # 2. 清掃（メッセージ削除処理）
+    # --------------------------------------------------
+    for word in DELETE_WORDS:
+        word_normalized = normalize_text(word)
+        if word_normalized in content_normalized:
             try:
                 await message.delete()
-                warning = await message.channel.send(
-                    f"{message.author.mention} 治安維持のため、ルンバが不適切な表現を清掃しました。", 
-                    delete_after=5
+                clean_msg = await message.channel.send(
+                    f"🧹 **清掃完了:** {message.author.mention} の不適切な発言をルンバがキレイに清掃しました。"
                 )
-                print(f"【清掃】{message.author} のメッセージ（禁止ワード: {delete_word}）を削除しました。")
-                return
+                await clean_msg.delete(delay=5)
             except discord.Forbidden:
-                print("【権限エラー】メッセージを削除する権限がBotにありません。")
+                pass
+            except discord.HTTPException as e:
+                print(f"【削除エラー】: {e}")
+            return
 
     await bot.process_commands(message)
 
-# 4. Botの起動（環境変数からトークンを取得）
+# 起動
 if __name__ == "__main__":
     token = os.getenv("DISCORD_TOKEN")
-    if not token:
-        print("【エラー】DISCORD_TOKEN が設定されていません。")
-    else:
+    if token:
         bot.run(token)
+    else:
+        print("【エラー】DISCORD_TOKEN が設定されていません。")
