@@ -1,8 +1,20 @@
+import asyncio
 import os
 import random
+import signal
+import sys
 import unicodedata
 import discord
 from discord.ext import commands
+
+# --- 設定項目 ---
+
+# 捕食ログ（処分記録）を投稿するチャンネルID
+RECORD_CHANNEL_ID = 1531955600819359808
+
+# 自動リブート（クリーンシャットダウン）までの時間（秒）
+# 例: 85800秒 = 23時間50分（GitHub Actionsの6時間制限なら 20700秒 = 5時間45分 などに調整）
+LIFETIME_SECONDS = 20700  
 
 # 1. Botの基本設定と権限（Intents）
 intents = discord.Intents.default()
@@ -10,11 +22,6 @@ intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-
-# --- 設定項目 ---
-
-# 捕食ログ（処分記録）を投稿するチャンネルID
-RECORD_CHANNEL_ID = 1531955600819359808
 
 # 2. 【即捕食（BAN）】対象ワード リスト
 BAN_WORDS = [
@@ -40,14 +47,10 @@ def normalize_text(text: str) -> str:
     return unicodedata.normalize('NFKC', text).lower()
 
 def bite_text(text: str, chance: float = 0.25) -> str:
-    """
-    文章全体から多種多様な噛み・ドモリを発生させ、
-    噛んだ場合は慌てて自力で言い直す演出を追加する関数
-    """
+    """文章全体から多種多様な噛み・ドモリを発生させ、言い直す関数"""
     if random.random() > chance:
-        return text  # 噛まない（完璧な発言）
+        return text
 
-    # 1. 置き換えパターン
     replacements = {
         "でした": ["でひた", "でふた", "でしゅた"],
         "しました": ["ひました", "しやした", "しまひた"],
@@ -68,7 +71,6 @@ def bite_text(text: str, chance: float = 0.25) -> str:
     bitten = text
     bitten_flag = False
 
-    # 単語置き換え
     for original, changed in replacements.items():
         if original in bitten:
             if isinstance(changed, list):
@@ -77,7 +79,6 @@ def bite_text(text: str, chance: float = 0.25) -> str:
                 bitten = bitten.replace(original, changed, 1)
             bitten_flag = True
 
-    # 助詞のドモリ
     particles = ["は", "が", "を", "に"]
     for p in particles:
         if p in bitten and random.random() < 0.3:
@@ -85,7 +86,6 @@ def bite_text(text: str, chance: float = 0.25) -> str:
             bitten_flag = True
             break
 
-    # 2. 噛んだ場合の「言い直し」セリフを文末に追加
     if bitten_flag:
         fix_phrases = [
             "……あ、コホン！……違います、です！",
@@ -101,9 +101,19 @@ def bite_text(text: str, chance: float = 0.25) -> str:
     return bitten
 
 
+# --- 自動シャットダウン（リブート）タスク ---
+async def scheduled_graceful_shutdown(delay: int):
+    """指定時間経過後に安全にDiscord接続を閉じる"""
+    await asyncio.sleep(delay)
+    print(f"\n【定期リブート】稼働時間（{delay}秒）に達したため、安全なシャットダウンシーケンスを開始します...")
+    await bot.close()
+
+
 @bot.event
 async def on_ready():
     print(f"【起動完了】{bot.user} が獲物を探して目を光らせています...")
+    # 起動と同時にタイマーを開始
+    bot.loop.create_task(scheduled_graceful_shutdown(LIFETIME_SECONDS))
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -112,9 +122,7 @@ async def on_message(message: discord.Message):
 
     content_normalized = normalize_text(message.content)
 
-    # --------------------------------------------------
     # 1. 捕食（即BAN処理）
-    # --------------------------------------------------
     detected_ban_words = [
         word for word in BAN_WORDS 
         if normalize_text(word) in content_normalized
@@ -128,7 +136,6 @@ async def on_message(message: discord.Message):
 
         words_str = "』『".join(detected_ban_words)
 
-        # DM通知（噛み＆言い直し適用）
         raw_dm_notice = (
             f"【捕食通知】\n"
             f"あなたは禁止ワード『{words_str}』を放ったため、弱肉強食の理により食されました。\n"
@@ -144,7 +151,6 @@ async def on_message(message: discord.Message):
         except discord.HTTPException as e:
             print(f"【DM送信エラー】: {e}")
 
-        # BANを実行
         try:
             reason_words = ", ".join(detected_ban_words)
             await message.guild.ban(
@@ -152,18 +158,15 @@ async def on_message(message: discord.Message):
                 reason=f"禁止ワード（{reason_words}）の検出により子分BOTが捕食（BAN）しました。"
             )
             
-            # 発言チャンネルでの報告（噛み＆言い直し適用）
-            raw_channel_eat_text = f"🍖 **捕食完了:** {message.author.mention} は禁止ワードを放ったため、美味しく食されました。ごちそうさまでした！"
+            raw_channel_eat_text = f"🍖 **捕食完了:** {message.author.mention} は禁止ワードを放ったため、美味しく食されました。ごちそうさでした！"
             channel_eat_text = bite_text(raw_channel_eat_text, chance=0.25)
             eat_msg = await message.channel.send(channel_eat_text)
             await eat_msg.delete(delay=5)
 
-            # --- 処分記録（アーカイブ）投稿 ---
             record_channel = bot.get_channel(RECORD_CHANNEL_ID)
             if record_channel:
                 title_text = bite_text("📜 【捕食アーカイブ】処分ユーザー記録", chance=0.25)
-                # 本文は固定で威厳を保つ
-                desc_text = "弱肉強食の理により、新たな荒らしが食されました。ごちそうさまでした！"
+                desc_text = "弱肉強食の理により、新たな荒らしが食されました。ごちそうさでした！"
                 footer_text = bite_text("弱肉強食の理により、サーバーの平和は保たれた…", chance=0.25)
 
                 embed = discord.Embed(
@@ -189,9 +192,7 @@ async def on_message(message: discord.Message):
 
         return
 
-    # --------------------------------------------------
     # 2. 清掃（メッセージ削除処理）
-    # --------------------------------------------------
     for word in DELETE_WORDS:
         if normalize_text(word) in content_normalized:
             try:
@@ -208,10 +209,25 @@ async def on_message(message: discord.Message):
 
     await bot.process_commands(message)
 
-# 起動
-if __name__ == "__main__":
+
+# メイン実行部
+async def main():
     token = os.getenv("DISCORD_TOKEN")
-    if token:
-        bot.run(token)
-    else:
+    if not token:
         print("【エラー】DISCORD_TOKEN が設定されていません。")
+        sys.exit(1)
+
+    async with bot:
+        await bot.start(token)
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+        print("【正常終了】Botは安全にシャットダウンしました（Exit Code 0）。")
+        sys.exit(0)
+    except (KeyboardInterrupt, SystemExit):
+        print("【手動停止】外部シグナルにより正常終了します。")
+        sys.exit(0)
+    except Exception as e:
+        print(f"【予期せぬ例外】: {e}")
+        sys.exit(1)
