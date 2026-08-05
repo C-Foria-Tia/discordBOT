@@ -13,7 +13,7 @@ from discord.ext import commands
 RECORD_CHANNEL_ID = 1531955600819359808
 
 # 自動リブート（クリーンシャットダウン）までの時間（秒）
-# 例: 85800秒 = 23時間50分（GitHub Actionsの6時間制限なら 20700秒 = 5時間45分 などに調整）
+# 例: 5時間45分（GitHub Actionsの標準タイムアウト回避用）
 LIFETIME_SECONDS = 20700  
 
 # 1. Botの基本設定と権限（Intents）
@@ -91,7 +91,7 @@ def bite_text(text: str, chance: float = 0.25) -> str:
             "……あ、コホン！……違います、です！",
             "……っ！……じゃなくて、です！",
             "……噛みました。……ゲホン、です！",
-            "……あふっ！……気を取り直して、です！",
+            "……あふっ！……気を取り直して, です！",
             "……〜〜〜っ！……噛んでないです、です！"
         ]
         bitten += f" {random.choice(fix_phrases)}"
@@ -210,12 +210,27 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 
-# メイン実行部
+# --- メイン実行部 ＆ キャンセル操作キャッチ ---
 async def main():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         print("【エラー】DISCORD_TOKEN が設定されていません。")
         sys.exit(1)
+
+    loop = asyncio.get_running_loop()
+
+    # キャンセル（SIGINT / SIGTERM）を受け取った時のハンドラ設定
+    def handle_cancel_signal(signum, frame):
+        print(f"\n【キャンセル検知】シグナル {signum} を受信。正常終了シーケンスへ移行します...")
+        # 非同期で接続をクローズ
+        asyncio.run_coroutine_threadsafe(bot.close(), loop)
+
+    # Windows / Linux の両方でキャンセルシグナルを補獲
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, handle_cancel_signal)
+        except (ValueError, AttributeError):
+            pass  # OS非互換シグナルのパス
 
     async with bot:
         await bot.start(token)
@@ -223,11 +238,14 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-        print("BOTsystemd[1]: Reached target Shutdown.（Exit Code 0）。")
+        print("【正常終了】Botは安全にシャットダウンしました（Exit Code 0）。")
         sys.exit(0)
-    except (KeyboardInterrupt, SystemExit):
-        print("【手動停止】外部シグナルにより正常終了します。")
+    except KeyboardInterrupt:
+        print("【キーボード中断】正常終了扱い（Exit Code 0）としてプロセスを閉じます。")
         sys.exit(0)
+    except SystemExit as e:
+        # sys.exit() が呼ばれた際のエラー潰し
+        sys.exit(e.code)
     except Exception as e:
         print(f"【予期せぬ例外】: {e}")
         sys.exit(1)
