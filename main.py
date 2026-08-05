@@ -223,7 +223,7 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-        print("【正常終了】Botは安全にシャットダウンしました（Exit Code 0）。")
+        print("BOTsystemd[1]: Reached target Shutdown.（Exit Code 0）。")
         sys.exit(0)
     except (KeyboardInterrupt, SystemExit):
         print("【手動停止】外部シグナルにより正常終了します。")
