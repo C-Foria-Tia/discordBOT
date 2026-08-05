@@ -11,6 +11,11 @@ on:
   schedule:
     - cron: '0 */6 * * *'
 
+# 同時実行の制御：新しい実行が始まったら前のジョブをキャンセル（メール飛ばさず終了させる）
+concurrency:
+  group: roomba-bot-group
+  cancel-in-progress: true
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -32,9 +37,18 @@ jobs:
         python -m pip install --upgrade pip
         pip install discord.py
 
-    # 4. Botを実行（最大6時間動かす）
+    # 4. Botを実行（タイムアウト/キャンセルが発生してもエラーにしない）
     - name: Run Discord Bot
+      id: run_bot
       timeout-minutes: 350
+      continue-on-error: true
       env:
         DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
       run: python main.py
+
+    # 5. キャンセル時・タイムアウト時でも強制的にSuccessステータスで終了（メール通知の遮断）
+    - name: Ensure Clean Exit
+      if: always()
+      run: |
+        echo "Bot execution cycle completed. Enforcing success status to prevent error emails."
+        exit 0
