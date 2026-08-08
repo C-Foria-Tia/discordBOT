@@ -51,16 +51,17 @@ def show_debian_boot_banner():
     log_debian_ok("Starting Roomba Control Daemon...")
     log_debian_ok("Mounted /dev/discord/bot-env.")
 
-def show_debian_shutdown_banner():
-    """停止時の Debian 風シャットダウンログ"""
+async def show_debian_shutdown_sequence():
+    """停止時の Debian 風シャットダウンアニメーション ＆ ログ"""
     print("\n")
-    log_debian_ok("Stopping Roomba Control Daemon...")
+    await log_debian_working("Stopping Roomba Control Daemon...", duration=1.2)
     log_debian_ok("Closed Discord Gateway Socket.")
     log_debian_ok("Unmounted /dev/discord/bot-env.")
     log_debian_ok("Stopped target Local File Systems.")
     log_debian_ok("Reached target System Shutdown.")
     log_debian_ok("Finished Power-Off.")
     print("[  \033[1;32mOK\033[0m  ] Reached target Power-Off.\n")
+    sys.stdout.flush()
 
 def trigger_kernel_panic(exc_type, exc_value, exc_traceback):
     """異常終了時に Kernel Panic 画面を出力する"""
@@ -71,7 +72,6 @@ def trigger_kernel_panic(exc_type, exc_value, exc_traceback):
     print(f"[    0.000015] Call Trace:")
     print(f"[    0.000020]  <TASK>")
     
-    # Pythonのエラートレースをカーネルコールトレース風にフォーマット
     tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
     for line in tb_lines:
         for sub_line in line.strip().split('\n'):
@@ -98,6 +98,9 @@ intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+# シャットダウン検知用の非同期フラグ
+shutdown_event = asyncio.Event()
 
 BAN_WORDS = [
     "野獣先輩", "YJSPY", "yjspy", "やじゅうせんぱい", "ヤジュウセンパイ",
@@ -178,10 +181,9 @@ def bite_text(text: str, chance: float = 0.25) -> str:
 # ==================================================
 
 async def scheduled_graceful_shutdown(delay: int):
+    """一定時間経過による自動シャットダウン"""
     await asyncio.sleep(delay)
-    print("\n")
-    await log_debian_working("Initiating scheduled system reboot...", duration=1.0)
-    await bot.close()
+    shutdown_event.set()
 
 @bot.event
 async def on_ready():
@@ -287,10 +289,63 @@ async def on_message(message: discord.Message):
 
 
 # ==================================================
-# --- エントリーポイント ---
+# --- エントリーポイント (シグナル ＆ 起動管理) ---
 # ==================================================
 
 async def main():
+    token = os.getenv("DISCORD_TOKEN")
+    if not token:
+        raise ValueError("DISCORD_TOKEN environment variable is not set")
+
+    loop = asyncio.get_running_loop()
+
+    # シグナルハンドラからはフラグを立てるだけ（安全）
+    def signal_handler():
+        shutdown_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, signal_handler)
+        except NotImplementedError:
+            # Windows環境などのバックアップ
+            signal.signal(sig, lambda s, f: shutdown_event.set())
+
+    # Bot起動タスクとシャットダウン監視タスクを並列実行
+    bot_task = asyncio.create_task(bot.start(token))
+    shutdown_task = asyncio.create_task(shutdown_event.wait())
+
+    # いずれかのイベントが発生するまで待機
+    done, pending = await asyncio.wait(
+        [bot_task, shutdown_task],
+        return_when=asyncio.FIRST_COMPLETED
+    )
+
+    # シャットダウンイベントが検知された場合
+    if shutdown_event.is_set():
+        await show_debian_shutdown_sequence()
+        await bot.close()
+
+    # 残りのタスクをキャンセル＆クリーンアップ
+    for task in pending:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    # bot_task で例外が起きていた場合は再スローして Kernel Panic を発火させる
+    if bot_task in done and bot_task.exception():
+        raise bot_task.exception()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+        sys.exit(0)
+    except (KeyboardInterrupt, SystemExit):
+        sys.exit(0)
+    except Exception as e:
+        trigger_kernel_panic(type(e), e, e.__traceback__)
+        sys.exit(1)):
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         # トークンなしの場合もカーネルパニックを発火
