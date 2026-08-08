@@ -35,13 +35,12 @@ jobs:
         continue-on-error: true
 
       - name: Send Notification to Discord
-        # 成功・失敗・キャンセル（cancelled）のどれであっても必ず実行する
-        if: always() || cancelled()
+        if: always()
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           LOG_CHANNEL_ID: "1531955600819359808"
-          # キャンセル発生時は outcome が入らない場合があるためステータス判定を補完
-          RUN_OUTCOME: ${{ steps.run_bot.outcome != '' && steps.run_bot.outcome || (cancelled() && 'cancelled' || 'failure') }}
+          # steps.run_bot.conclusion を参照することで構文エラーを回避
+          RUN_OUTCOME: ${{ steps.run_bot.conclusion != '' && steps.run_bot.conclusion || steps.run_bot.outcome }}
           BOT_EXIT_CODE: ${{ env.EXIT_CODE }}
         run: |
           python - << 'EOF'
@@ -149,7 +148,6 @@ jobs:
                   f"```"
               )
 
-          # HTTP REST API で直接送信（discord.py の Gateway 接続待機を回避し即時送信）
           url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
           headers = {
               "Authorization": f"Bot {token}",
