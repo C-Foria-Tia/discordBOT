@@ -2,7 +2,6 @@ name: Run Discord Bot
 
 on:
   schedule:
-    # 5時間45分（345分）ごとに自動実行
     - cron: '45 */5 * * *'
   workflow_dispatch:
 
@@ -29,31 +28,31 @@ jobs:
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
         run: |
-          # 実行ログと終了コードをキャプチャ
           python main.py > bot_output.log 2>&1
           EXIT_CODE=$?
           echo "EXIT_CODE=$EXIT_CODE" >> $GITHUB_ENV
           exit $EXIT_CODE
-        # エラーが起きてもワークフローを中断せず、通知処理へ進める
         continue-on-error: true
 
-      - name: Send Notification to Discord Channel
-        if: always()
+      - name: Send Notification to Discord
+        # 成功・失敗・キャンセル（cancelled）のどれであっても必ず実行する
+        if: always() || cancelled()
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           LOG_CHANNEL_ID: "1531955600819359808"
-          RUN_OUTCOME: ${{ steps.run_bot.outcome }}
+          # キャンセル発生時は outcome が入らない場合があるためステータス判定を補完
+          RUN_OUTCOME: ${{ steps.run_bot.outcome != '' && steps.run_bot.outcome || (cancelled() && 'cancelled' || 'failure') }}
           BOT_EXIT_CODE: ${{ env.EXIT_CODE }}
         run: |
           python - << 'EOF'
           import os
           import sys
+          import json
           import random
-          import discord
-          import asyncio
+          import urllib.request
 
           token = os.getenv("DISCORD_TOKEN")
-          channel_id = int(os.getenv("LOG_CHANNEL_ID"))
+          channel_id = os.getenv("LOG_CHANNEL_ID")
           outcome = os.getenv("RUN_OUTCOME", "failure")
           exit_code_str = os.getenv("BOT_EXIT_CODE", "1")
 
@@ -89,31 +88,24 @@ jobs:
                   f"```"
               )
           else:
-              # 1. SyntaxError や Syntax / Import 周りの初動エラー（インポート到達前）
               if "SyntaxError" in log_content or "IndentationError" in log_content:
                   err_module = "PyParser_ASTFromFileObject"
                   err_msg = "Invalid python syntax detected before module import"
                   hex_code = "0x00000080"
                   rip_addr = "0xffffffff8100a012"
                   bios_bug = "ACPI: [Firmware Bug]: Your BIOS is broken; FW bug workaround enabled."
-
-              # 2. ModuleNotFoundError（import 試行時）
               elif "ModuleNotFoundError" in log_content or "ImportError" in log_content:
                   err_module = "PyImport_ImportModuleLevelObject"
                   err_msg = "Required library dependency missing from environment"
                   hex_code = "0x00000002"
                   rip_addr = "0xffffffff8101f9b8"
                   bios_bug = "ACPI: [Firmware Bug]: Your BIOS is broken; replace hardware immediately."
-
-              # 3. 認証エラー (discord.py 実行中)
               elif "LoginFailure" in log_content or "Improper token" in log_content:
                   err_module = "discord_auth_login"
                   err_msg = "Invalid or expired authentication token"
                   hex_code = "0x00000001"
                   rip_addr = "0xffffffff8124a102"
                   bios_bug = "ACPI: [Firmware Bug]: ACPI: BIOS _OSI(Linux) query ignored"
-
-              # 4. その他・ロジック例外
               else:
                   err_module = "roomba_bot_main_crash"
                   err_msg = "Unhandled exception in bot runtime"
@@ -157,21 +149,19 @@ jobs:
                   f"```"
               )
 
-          intents = discord.Intents.default()
-          client = discord.Client(intents=intents)
+          # HTTP REST API で直接送信（discord.py の Gateway 接続待機を回避し即時送信）
+          url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+          headers = {
+              "Authorization": f"Bot {token}",
+              "Content-Type": "application/json",
+              "User-Agent": "DiscordBot (GitHubActions, 1.0)"
+          }
+          payload = json.dumps({"embeds": [{"description": desc}]}).encode("utf-8")
 
-          @client.event
-          async def on_ready():
-              try:
-                  channel = client.get_channel(channel_id)
-                  if channel:
-                      embed = discord.Embed(description=desc)
-                      await channel.send(embed=embed)
-              except Exception as e:
-                  print(f"Failed to send log notification: {e}")
-              finally:
-                  await client.close()
-
-          if token:
-              asyncio.run(client.start(token))
+          try:
+              req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+              with urllib.request.urlopen(req, timeout=5) as res:
+                  print(f"Notification sent successfully: Status {res.status}")
+          except Exception as e:
+              print(f"Failed to send notification via REST API: {e}")
           EOF
