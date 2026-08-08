@@ -3,27 +3,102 @@ import os
 import random
 import signal
 import sys
+import time
+import traceback
 import unicodedata
 import discord
 from discord.ext import commands
 
-# --- 設定項目 ---
+# ==================================================
+# --- Debian風 ＆ Kernel Panic システムログユーティリティ ---
+# ==================================================
 
-# 捕食ログ（処分記録）を投稿するチャンネルID
+def log_debian_ok(message: str):
+    """Debianの [  OK  ] ログを表示"""
+    print(f"[  \033[1;32mOK\033[0m  ] {message}")
+    sys.stdout.flush()
+
+async def log_debian_working(message: str, duration: float = 1.8):
+    """
+    Debian風 [****] バウンシング（跳ね返り）アニメーション
+    """
+    width = 7
+    pat_len = 4
+    max_pos = width - pat_len
+    
+    pos = 0
+    direction = 1
+    end_time = time.time() + duration
+    
+    while time.time() < end_time:
+        pattern = " " * pos + "*" * pat_len + " " * (max_pos - pos)
+        sys.stdout.write(f"\r[ \033[1;33m{pattern}\033[0m ] {message}")
+        sys.stdout.flush()
+        
+        await asyncio.sleep(0.08)
+        
+        pos += direction
+        if pos >= max_pos or pos <= 0:
+            direction *= -1
+    
+    sys.stdout.write(f"\r[  \033[1;32mOK\033[0m  ] {message}\n")
+    sys.stdout.flush()
+
+def show_debian_boot_banner():
+    """起動時の Debian 風システムログ"""
+    print("\nLinux roomba-bot 6.1.0-18-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.76-1 x86_64\n")
+    log_debian_ok("Created slice System Slice.")
+    log_debian_ok("Starting Roomba Control Daemon...")
+    log_debian_ok("Mounted /dev/discord/bot-env.")
+
+def show_debian_shutdown_banner():
+    """停止時の Debian 風シャットダウンログ"""
+    print("\n")
+    log_debian_ok("Stopping Roomba Control Daemon...")
+    log_debian_ok("Closed Discord Gateway Socket.")
+    log_debian_ok("Unmounted /dev/discord/bot-env.")
+    log_debian_ok("Stopped target Local File Systems.")
+    log_debian_ok("Reached target System Shutdown.")
+    log_debian_ok("Finished Power-Off.")
+    print("[  \033[1;32mOK\033[0m  ] Reached target Power-Off.\n")
+
+def trigger_kernel_panic(exc_type, exc_value, exc_traceback):
+    """異常終了時に Kernel Panic 画面を出力する"""
+    print("\n")
+    print("\033[1;31m[    0.000000] Kernel panic - not syncing: Fatal exception in interrupt\033[0m")
+    print(f"[    0.000005] CPU: 0 PID: 1 Comm: roomba-bot Tainted: G        W          6.1.0-18-amd64")
+    print(f"[    0.000010] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS 1.15.0-1")
+    print(f"[    0.000015] Call Trace:")
+    print(f"[    0.000020]  <TASK>")
+    
+    # Pythonのエラートレースをカーネルコールトレース風にフォーマット
+    tb_lines = traceback.format_exception(exc_type, exc_value, exc_traceback)
+    for line in tb_lines:
+        for sub_line in line.strip().split('\n'):
+            print(f"[    0.000025]  [<ffffffff81{random.randint(100000, 999999):x}>] {sub_line}")
+            
+    print(f"[    0.000030]  </TASK>")
+    print(f"[    0.000035] Kernel Offset: disabled")
+    print(f"[    0.000040] ---[ end Kernel panic - not syncing: {exc_type.__name__}: {exc_value} ]---\033[0m\n")
+    sys.stdout.flush()
+
+# 未捕獲例外をカーネルパニックにフック
+sys.excepthook = trigger_kernel_panic
+
+
+# ==================================================
+# --- Bot 設定 ＆ ワードリスト ---
+# ==================================================
+
 RECORD_CHANNEL_ID = 1531955600819359808
-
-# 自動リブート（クリーンシャットダウン）までの時間（秒）
-# 例: 5時間45分（GitHub Actionsの標準タイムアウト回避用）
 LIFETIME_SECONDS = 20700  
 
-# 1. Botの基本設定と権限（Intents）
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 2. 【即捕食（BAN）】対象ワード リスト
 BAN_WORDS = [
     "野獣先輩", "YJSPY", "yjspy", "やじゅうせんぱい", "ヤジュウセンパイ",
     "死ね", "タヒね", "しね", "シネ", "殺す", "殺すぞ",
@@ -31,7 +106,6 @@ BAN_WORDS = [
     "1919", "810", "114514810"
 ]
 
-# 3. 【ルンバお掃除】自動削除ワード リスト
 DELETE_WORDS = [
     "障害者", "ガイジ", "キチガイ", "きちがい",
     "ゴミ", "カス", "雑魚", "ざこ", "不細工", "ぶさいく",
@@ -43,11 +117,9 @@ DELETE_WORDS = [
 ]
 
 def normalize_text(text: str) -> str:
-    """全角・半角の揺れや大文字小文字を統一する"""
     return unicodedata.normalize('NFKC', text).lower()
 
 def bite_text(text: str, chance: float = 0.25) -> str:
-    """文章全体から多種多様な噛み・ドモリを発生させ、言い直す関数"""
     if random.random() > chance:
         return text
 
@@ -91,7 +163,7 @@ def bite_text(text: str, chance: float = 0.25) -> str:
             "……あ、コホン！……違います、です！",
             "……っ！……じゃなくて、です！",
             "……噛みました。……ゲホン、です！",
-            "……あふっ！……気を取り直して, です！",
+            "……あふっ！……気を取り直して、です！",
             "……〜〜〜っ！……噛んでないです、です！"
         ]
         bitten += f" {random.choice(fix_phrases)}"
@@ -101,18 +173,21 @@ def bite_text(text: str, chance: float = 0.25) -> str:
     return bitten
 
 
-# --- 自動シャットダウン（リブート）タスク ---
-async def scheduled_graceful_shutdown(delay: int):
-    """指定時間経過後に安全にDiscord接続を閉じる"""
-    await asyncio.sleep(delay)
-    print(f"\n【定期リブート】稼働時間（{delay}秒）に達したため、安全なシャットダウンシーケンスを開始します...")
-    await bot.close()
+# ==================================================
+# --- イベント・タスクハンドラ ---
+# ==================================================
 
+async def scheduled_graceful_shutdown(delay: int):
+    await asyncio.sleep(delay)
+    print("\n")
+    await log_debian_working("Initiating scheduled system reboot...", duration=1.0)
+    await bot.close()
 
 @bot.event
 async def on_ready():
-    print(f"【起動完了】{bot.user} が獲物を探して目を光らせています...")
-    # 起動と同時にタイマーを開始
+    show_debian_boot_banner()
+    await log_debian_working(f"Starting Discord Bot Service for {bot.user}...", duration=2.0)
+    log_debian_ok("Reached target Multi-User System / Ready for prey.")
     bot.loop.create_task(scheduled_graceful_shutdown(LIFETIME_SECONDS))
 
 @bot.event
@@ -139,17 +214,17 @@ async def on_message(message: discord.Message):
         raw_dm_notice = (
             f"【捕食通知】\n"
             f"あなたは禁止ワード『{words_str}』を放ったため、弱肉強食の理により食されました。\n"
-            f"ごちそうさまでした。二度とお目にかかることはないでしょう。"
+            f"ごちそうさでした。二度とお目にかかることはないでしょう。"
         )
         dm_notice = bite_text(raw_dm_notice, chance=0.25)
 
         try:
             await message.author.send(dm_notice)
-            print(f"【捕食】{message.author} にDM（宣告）を送信しました。")
+            log_debian_ok(f"Sent prey notification DM to {message.author}")
         except discord.Forbidden:
-            print(f"【警告】{message.author} のDMが閉じているため、直接捕食へ移行します。")
+            log_debian_ok(f"DM closed for {message.author}. Proceeding directly to ban.")
         except discord.HTTPException as e:
-            print(f"【DM送信エラー】: {e}")
+            print(f"[ \033[1;31mFAILED\033[0m ] DM Error: {e}")
 
         try:
             reason_words = ", ".join(detected_ban_words)
@@ -181,7 +256,7 @@ async def on_message(message: discord.Message):
                 
                 await record_channel.send(embed=embed)
 
-            print(f"【捕食完了】{message.author} をBAN（完食）しました。")
+            log_debian_ok(f"Banned user {message.author} successfully.")
 
         except discord.Forbidden:
             raw_err_msg = "【エラー】捕食しようとしましたが、権限が足りず食べ残してしまいました（BOTより権限が高いか同等です）。"
@@ -201,36 +276,38 @@ async def on_message(message: discord.Message):
                 clean_text = bite_text(raw_clean_text, chance=0.25)
                 clean_msg = await message.channel.send(clean_text)
                 await clean_msg.delete(delay=5)
+                log_debian_ok(f"Cleaned message from {message.author}")
             except discord.Forbidden:
                 pass
             except discord.HTTPException as e:
-                print(f"【削除エラー】: {e}")
+                print(f"[ \033[1;31mFAILED\033[0m ] Delete Error: {e}")
             return
 
     await bot.process_commands(message)
 
 
-# --- メイン実行部 ＆ キャンセル操作キャッチ ---
+# ==================================================
+# --- エントリーポイント ---
+# ==================================================
+
 async def main():
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        print("【エラー】DISCORD_TOKEN が設定されていません。")
-        sys.exit(1)
+        # トークンなしの場合もカーネルパニックを発火
+        raise ValueError("DISCORD_TOKEN environment variable is not set")
 
     loop = asyncio.get_running_loop()
 
-    # キャンセル（SIGINT / SIGTERM）を受け取った時のハンドラ設定
     def handle_cancel_signal(signum, frame):
-        print(f"\n【キャンセル検知】シグナル {signum} を受信。正常終了シーケンスへ移行します...")
-        # 非同期で接続をクローズ
+        print("\n")
+        log_debian_ok(f"Received signal {signum}. Initiating graceful shutdown...")
         asyncio.run_coroutine_threadsafe(bot.close(), loop)
 
-    # Windows / Linux の両方でキャンセルシグナルを補獲
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
             signal.signal(sig, handle_cancel_signal)
         except (ValueError, AttributeError):
-            pass  # OS非互換シグナルのパス
+            pass
 
     async with bot:
         await bot.start(token)
@@ -238,14 +315,16 @@ async def main():
 if __name__ == "__main__":
     try:
         asyncio.run(main())
-        print("【正常終了】Botは安全にシャットダウンしました（Exit Code 0）。")
+        show_debian_shutdown_banner()
         sys.exit(0)
     except KeyboardInterrupt:
-        print("【キーボード中断】正常終了扱い（Exit Code 0）としてプロセスを閉じます。")
+        show_debian_shutdown_banner()
         sys.exit(0)
     except SystemExit as e:
-        # sys.exit() が呼ばれた際のエラー潰し
         sys.exit(e.code)
     except Exception as e:
-        print(f"【予期せぬ例外】: {e}")
+        # 予期せぬ例外発生時、Kernel Panic ログを出力
+        trigger_kernel_panic(type(e), e, e.__traceback__)
+        # YAMLの `continue-on-error` や `exit 0` ステップがあるので、
+        # コンソール上で見事なカーネルパニックを出しつつメール通知は塞げます。
         sys.exit(1)
