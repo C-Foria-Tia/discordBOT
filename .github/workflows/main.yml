@@ -39,8 +39,9 @@ jobs:
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           LOG_CHANNEL_ID: "1531955600819359808"
-          # steps.run_bot.conclusion を参照することで構文エラーを回避
-          RUN_OUTCOME: ${{ steps.run_bot.conclusion != '' && steps.run_bot.conclusion || steps.run_bot.outcome }}
+          # 式の中での cancelled() 関数呼び出しを削除し、ステップの出力値のみ渡す
+          STEP_OUTCOME: ${{ steps.run_bot.outcome }}
+          STEP_CONCLUSION: ${{ steps.run_bot.conclusion }}
           BOT_EXIT_CODE: ${{ env.EXIT_CODE }}
         run: |
           python - << 'EOF'
@@ -52,9 +53,19 @@ jobs:
 
           token = os.getenv("DISCORD_TOKEN")
           channel_id = os.getenv("LOG_CHANNEL_ID")
-          outcome = os.getenv("RUN_OUTCOME", "failure")
-          exit_code_str = os.getenv("BOT_EXIT_CODE", "1")
+          
+          # ステータスの判定ロジックを Python 側に集約
+          step_outcome = os.getenv("STEP_OUTCOME", "")
+          step_conclusion = os.getenv("STEP_CONCLUSION", "")
+          
+          if step_conclusion == "cancelled" or step_outcome == "cancelled":
+              outcome = "cancelled"
+          elif step_conclusion == "success" or step_outcome == "success":
+              outcome = "success"
+          else:
+              outcome = "failure"
 
+          exit_code_str = os.getenv("BOT_EXIT_CODE", "1")
           try:
               exit_code = int(exit_code_str)
           except ValueError:
