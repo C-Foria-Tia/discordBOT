@@ -345,7 +345,7 @@ if __name__ == "__main__":
         sys.exit(0)
     except Exception as e:
         trigger_kernel_panic(type(e), e, e.__traceback__)
-        sys.exit(1)========
+        sys.exit(1)
 
 async def main():
     token = os.getenv("DISCORD_TOKEN")
@@ -400,7 +400,7 @@ if __name__ == "__main__":
         sys.exit(0)
     except Exception as e:
         trigger_kernel_panic(type(e), e, e.__traceback__)
-        sys.exit(1):
+        sys.exit(1)
     token = os.getenv("DISCORD_TOKEN")
     if not token:
         # トークンなしの場合もカーネルパニックを発火
